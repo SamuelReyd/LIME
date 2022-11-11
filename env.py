@@ -1,95 +1,172 @@
 from xmlrpc.client import boolean
 import numpy as np
+import json
 from typing import List, Dict, Tuple
 from enum import Enum
+from agent import *
 
 
 
-class State:
-    def __init__(self, x: int, y: int, key: boolean):
-        self.x = x
-        self.y = y
-        self.key = key
 
-    @classmethod
-    def from_int(index: int) -> State:
-        pos = index // (env.H * env.W)
-        return State(pos % env.W, pos // env.H, index % (env.H * env.W))
-
-    def __index__(self):
-        return self.key * (env.H * env.W) + self.y * env.W + self.x
 
 
 class Cell:
-    def __init__(self, x, y, is_goal, has_key, is_start):
+    def __init__(self, x, y, walls, is_goal=False, has_key=False, is_start=False):
         self.x = x
         self.y = y
         self.is_goal = is_goal
         self.has_key = has_key
         self.is_start = is_start
+        self.walls = walls
+    
+    def has_wall(self, direction):
+        return self.walls[direction.value]
 
 class Environment:
-    def __init__(self, H: int, W: int, start_cell: Cell):
-        self.grid : Cell = start_cell
+
+    def __init__(self, H: int, W: int, cells: List[List[State]], max_steps:int):
+        self.grid : List[List[Cell]] = cells
         self.H = H
         self.W = W
-        current_state: State = State(0,0,False)
+        self.start_cell = [cell for line in cells for cell in line if cell.is_start][0]
+        self.current_state: State = State(self.start_cell.x, self.start_cell.y, False, H, W)
+        self.goal_states: List[State] = [State(cell.x, cell.y, True, H, W) for line in cells for cell in line if cell.is_goal]
+        self.n_step = 0
+        self.is_done = False
+        self.max_steps = max_steps
+        self.cell_dim = 5 # 4 walls and key
+
+        # TODO: Testing if cells are compatibles:
 
     def __str__(self):
-        pass
+        S = ""
+        # Plafond
+        for line in self.grid:
+            up_line = []
+            bottom_line = []
+            current_line = []
+            for cell in line:
+                up_line.append("---" if cell.walls[0] else "   ")
+                current_line.append("|" if cell.walls[1] else " ")
+                if cell.x == self.current_state.x and cell.y == self.current_state.y:
+                    current_line.append("P")
+                elif cell.is_start:
+                    current_line.append("S")
+                elif cell.is_goal:
+                    current_line.append("G")
+                elif cell.has_key:
+                    current_line.append("K")
+                else:
+                    current_line.append("E")
+                current_line.append("|" if cell.walls[3] else " ")
+                bottom_line.append("---" if cell.walls[2] else "   ")
+            S = S + "\n".join(["".join(l) for l in (up_line, current_line, bottom_line)]) + "\n"
+        S = S + "\b"
+        return S
 
-    def step(self, action) -> Tuple[State, float]:
+    def next_run(self):
+        self.current_state: State = State(self.start_cell.x, self.start_cell.y, False, self.H, self.W)
+        self.n_step = 0
+        self.is_done = False
+
+    def rollout(self, agent, verbose:int=0, learn:bool=True):
+        rewards: List[float] = []
+        states: List[State] = []
+        actions: List[Action] = []
+        while not self.is_done:
+            states.append(self.current_state)
+            action = agent.act(self.current_state) # get the agent action
+            reward = self.step(action, verbose) # the environment evolve based on the agent action and returns a reward
+            if learn: agent.feedback(reward, self.current_state, self.is_done)
+            rewards.append(reward)
+            actions.append(action)
+            if verbose == 1: 
+                print(self.n_step, states[-1], action, reward, '->', self.current_state)
+            if verbose == 2: 
+                print(self)
+                print(action)
+                print("_"*30)
+                print()
+        return states, actions, rewards, agent
+
+    def get_cell(self, x:int, y:int) -> Cell:
+        return self.grid[y][x]
+
+    def get_current_cell(self) -> Cell:
+        return self.get_cell(self.current_state.x, self.current_state.y)
+
+    def step(self, action, verbose=False) -> Tuple[State, float]:
+        if verbose == 1: print("  Acting...")
+        if verbose == 1: print("  Cell:", self.get_current_cell().walls)
+        if verbose == 1: print("  Move:", action)
+        if action.value in range(4):
+            if verbose == 1: print("  Autorized:", not self.get_current_cell().has_wall(action))
+        if self.n_step > self.max_steps: 
+            self.is_done = True
+            return -200
+        self.n_step += 1
         reward = -1
+        x = self.current_state.x
+        y = self.current_state.y
+        key = self.current_state.key
 
-        if action is Action.UP:
-            self.current_state.x -= 1
-        elif action is Action.LEFT:
-            self.current_state.y -= 1
-        elif action is Action.DOWN:
-            self.current_state.x += 1
-        elif action is Action.RIGHT:
-            self.current_state.x += 1
+        cell = self.get_current_cell()
+        if cell.is_goal and self.current_state.key:
+            reward = 0
+            self.is_done = True
+
+        elif action is Action.UP and not self.get_current_cell().has_wall(Action.UP):
+            if verbose == 1: print("  Moved to:", x, y)
+            y -= 1
+        elif action is Action.LEFT and not self.get_current_cell().has_wall(Action.LEFT):
+            if verbose == 1: print("  Moved to:", x, y)
+            x -= 1
+        elif action is Action.DOWN and not self.get_current_cell().has_wall(Action.DOWN):
+            if verbose == 1: print("  Moved to:", x, y)
+            y += 1
+        elif action is Action.RIGHT and not self.get_current_cell().has_wall(Action.RIGHT):
+            if verbose == 1: print("  Moved to:", x, y)
+            x += 1
 
         elif action is Action.PICK_UP:
-            cell = self.grid.get_cell(self.current_state.x, self.current_state.y)
+            cell = self.get_current_cell()
             if cell.has_key:
-                self.current_state.key = True
-                cell.has_key = False
+                key = True
 
-        elif action is Action.USE:
-            cell = self.grid.get_cell(self.current_state.x, self.current_state.y)
-            if cell.is_goal and self.key:
-                reward = 0
-        return self.current_state, reward
+        # elif action is Action.USE:
+        #     cell = self.get_current_cell()
+        #     if cell.is_goal and self.current_state.key:
+        #         reward = 0
+        #         self.is_done = True
+        #         if verbose == 1: print("Done !")
+        self.current_state = State(x, y, key, self.H, self.W)
+        return reward
 
+    def get_num_states(self):
+        return self.H * self.W * 2
 
-class Action(Enum):
-    UP = 0
-    LEFT = 1
-    DOWN = 2
-    RIGHT = 3
-    PICK_UP = 4
-    USE = 5
+    @staticmethod
+    def crate_maze(name = "simple_maze", max_steps=10000):
+        with open(f"{name}.json") as file:
+            maze = json.load(file)
+        grid = []
+        for i in range(len(maze["walls"])):
+            line = []
+            for j in range(len(maze["walls"][0])):
+                line.append(Cell(j,i, maze["walls"][i][j]))
+            grid.append(line)
+        grid[maze["start"][0]][maze["start"][1]].is_start = True
+        grid[maze["key"][0]][maze["key"][1]].has_key = True
+        grid[maze["end"][0]][maze["end"][1]].is_goal = True
+        return Environment(len(grid), len(grid[0]), grid, max_steps)
 
-
-class Agent:
-    def __init__(self, nb_states: int, nb_actions: int, eps: float = 0.1):
-        self.nb_action = nb_actions
-        self.nb_states = nb_states
-        self.eps = eps
-        self.Q: np.array = np.random.rand(nb_states, nb_actions)
-
-    def act(self, current_state: State):
-        if np.random.rand() < self.eps:
-            return np.random.randint(self.nb_actions)
-        return np.argmax(self.Q[int(current_state)])
-
-def loop():
-    env = Environment()
-    agent = Agent()
-    rewards: List[float] = []
-    while env.is_done():
-        action = agent.act(env.get_state(agent))
-        new_state, reward = env.step(action)
-        rewards.append(reward)
-
+    def show_run(self, states, file_out=None):
+        S = ""
+        for state in states:
+            self.current_state = state
+            if file_out is None: print(self)
+            else:
+                S += self.__str__()
+        if file_out:
+            with open(file_out, "w") as file:
+                file.write(S)
