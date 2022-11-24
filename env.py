@@ -34,7 +34,7 @@ class Environment:
         self.n_step = 0
         self.is_done = False
         self.max_steps = max_steps
-        self.cell_dim = 5 # 4 walls and key
+        self.cell_dim = 6 # 4 walls, key and goal
 
         # TODO: Testing if cells are compatibles:
 
@@ -69,7 +69,7 @@ class Environment:
         self.n_step = 0
         self.is_done = False
 
-    def rollout(self, agent, verbose:int=0, learn:bool=True):
+    def rollout(self, agent, verbose:int=0, learn:bool=True) -> Tuple[List[State], List[Action], List[float], Agent]:
         rewards: List[float] = []
         states: List[State] = []
         actions: List[Action] = []
@@ -144,6 +144,15 @@ class Environment:
 
     def get_num_states(self):
         return self.H * self.W * 2
+
+    def to_vect(self):
+        x = []
+        for line in self.grid:
+            x_line = []
+            for cell in line:
+                x_line.append(cell.walls + [int(cell.has_key), int(cell.is_goal)])
+            x.append(x_line)
+        return np.rollaxis(np.array(x, dtype = float), -1)
 
     @staticmethod
     def crate_maze(name = "simple_maze", max_steps=10000):

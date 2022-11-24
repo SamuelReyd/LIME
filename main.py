@@ -40,7 +40,7 @@ def plot_perf_live(returns, path_length, fig, hfig, ax0, ax1, ax2, ax3, Q, H, W)
     fig.canvas.draw()
     hfig.update(fig)
 
-def main(name, max_steps, num_run, learn=True, agent=None):
+def main(name, max_steps, num_run, learn=True, agent=None, agent_class=TabularAgent):
     fig, axes = plt.subplots(1,3)
     plt.rcParams["figure.figsize"] = (30,5)
     ax1, ax2, ax3 = axes
@@ -50,7 +50,7 @@ def main(name, max_steps, num_run, learn=True, agent=None):
     plt.rcParams["figure.figsize"] = (30,5)
 
     env = Environment.crate_maze(name=name, max_steps=max_steps)
-    if agent is None: agent = Agent(env.get_num_states(), len(Action), env.current_state)
+    if agent is None: agent = agent_class(env)
     agent.learning = learn
 
     all_states = []
@@ -59,9 +59,9 @@ def main(name, max_steps, num_run, learn=True, agent=None):
     returns = []
     path_length = []
     for i in tqdm(range(num_run)):
-        states, actions, rewards, agent = env.rollout(agent, verbose=False, learn=False)
+        states, actions, rewards, agent = env.rollout(agent, verbose=False, learn=learn)
         env.next_run()
-        agent.next_run(env)
+        agent.next_run(env.current_state)
         all_states += [states]
         all_actions += [actions]
         all_rewards += [rewards]
